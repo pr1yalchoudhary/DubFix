@@ -1,0 +1,10 @@
+.venv/
+backend/.env
+backend/audio/
+__pycache__/
+.pytest_cache/
+node_modules/
+dist/
+.tools/
+*.log
+test-results/
