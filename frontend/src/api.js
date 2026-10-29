@@ -1,7 +1,54 @@
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '')
 let demoAccessToken = ''
+let visitorSession = ''
+let usageListener = () => {}
+let usageSubscribed = false
+let initialization
 
 export function setDemoAccessToken(value) { demoAccessToken = value.trim() }
+
+export function subscribeUsage(listener) {
+  usageListener = listener
+  usageSubscribed = true
+  return () => { if (usageListener === listener) { usageListener = () => {}; usageSubscribed = false } }
+}
+
+function rememberSession(token) {
+  visitorSession = token || ''
+  // Opaque server-issued credential only; Redis remains the quota authority.
+  try { sessionStorage.setItem('tweeq-anonymous-session', visitorSession) } catch { /* memory fallback */ }
+}
+
+export async function refreshUsage() {
+  try {
+    const status = await request('/api/public/usage')
+    usageListener(status)
+    return status
+  } catch (error) {
+    usageListener({ mode: 'public', unavailable: true, message: error.message })
+    throw error
+  }
+}
+
+export function initializeUsage() {
+  if (initialization) return initialization
+  initialization = (async () => {
+    try { visitorSession = sessionStorage.getItem('tweeq-anonymous-session') || '' } catch { /* memory fallback */ }
+    try {
+      if (visitorSession) {
+        try { return await refreshUsage() } catch (error) { if (error.status !== 401) throw error }
+      }
+      const status = await request('/api/public/session', {})
+      rememberSession(status.session_token)
+      usageListener(status)
+      return status
+    } catch (error) {
+      usageListener({ mode: 'public', unavailable: true, message: error.message })
+      throw error
+    }
+  })().finally(() => { initialization = undefined })
+  return initialization
+}
 
 export function apiUrl(path) {
   if (!path || /^(https?:|blob:|data:)/i.test(path)) return path
@@ -15,6 +62,7 @@ async function perform(path, body, kind, timeoutMs) {
     let response
     try {
       const headers = body ? { 'Content-Type': 'application/json' } : {}
+      if (visitorSession) headers['X-Visitor-Session'] = visitorSession
       if (demoAccessToken && ['/api/preview', '/api/transcribe'].includes(path)) headers.Authorization = `Bearer ${demoAccessToken}`
       response = await fetch(apiUrl(path), { signal: controller.signal, headers,
         ...(kind === 'blob' ? { cache: 'no-store' } : {}),
@@ -36,7 +84,13 @@ async function perform(path, body, kind, timeoutMs) {
     if (error.name === 'AbortError' || controller.signal.aborted) throw new Error('The request timed out. Your text is saved. Check the backend before trying again.' + (path === '/api/preview' ? ' Generation may already have consumed credits.' : ''))
     if (error instanceof SyntaxError) throw new Error('The backend returned an unreadable response. Check the server, then try again. Your text is saved.')
     throw error
-  } finally { clearTimeout(timer) }
+  } finally {
+    clearTimeout(timer)
+    if (usageSubscribed && ['/api/preview', '/api/transcribe'].includes(path)) {
+      // Errors and partial multi-call previews can consume quota too. Never retry AI.
+      refreshUsage().catch(() => {})
+    }
+  }
 }
 
 export const request = (path, body) => perform(path, body, 'json', 150000)

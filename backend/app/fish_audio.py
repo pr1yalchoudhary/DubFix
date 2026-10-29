@@ -5,6 +5,7 @@ from pathlib import Path
 
 import httpx
 import msgpack
+from .public_usage import reserve_operation
 
 
 class FishError(Exception):
@@ -33,6 +34,7 @@ async def create_voice(reference: Path, title: str):
         raise FishError('Backend configuration: set FISH_AUDIO_API_KEY in backend/.env and restart the backend.', 503)
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(120, connect=10)) as client:
+            await reserve_operation()
             response = await client.post('https://api.fish.audio/model',
                 headers={'Authorization': 'Bearer ' + os.environ['FISH_AUDIO_API_KEY'].strip()},
                 data={'type': 'tts', 'title': title, 'train_mode': 'fast', 'visibility': 'private', 'generate_sample': 'false'},
@@ -64,6 +66,7 @@ async def voice_state(model_id: str):
     from urllib.parse import quote
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(30, connect=10)) as client:
+            await reserve_operation()
             response = await client.get('https://api.fish.audio/model/' + quote(model_id, safe=''),
                 headers={'Authorization': 'Bearer ' + os.environ['FISH_AUDIO_API_KEY'].strip()})
             return voice_result(response)
@@ -106,6 +109,7 @@ async def generate(text: str, reference: Path, transcript: str | None = None, *,
     async with httpx.AsyncClient(timeout=httpx.Timeout(120, connect=10)) as client:
         for attempt in range(2):
             try:
+                await reserve_operation()
                 async with client.stream('POST', 'https://api.fish.audio/v1/tts', content=payload, headers=headers) as response:
                     status = response.status_code
                     if status in (429, 502, 503, 504) and attempt == 0:
@@ -144,6 +148,7 @@ async def transcribe(data: bytes):
         raise FishError('Configure FISH_AUDIO_API_KEY and restart the backend.', 503)
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(120, connect=10)) as client:
+            await reserve_operation()
             response = await client.post('https://api.fish.audio/v1/asr',
                 headers={'Authorization': 'Bearer ' + os.environ['FISH_AUDIO_API_KEY'].strip(), 'model': 'transcribe-1-pro'},
                 files={'audio': ('selection.wav', data, 'audio/wav')},

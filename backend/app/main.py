@@ -14,21 +14,21 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / '.env')
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 
-from . import audio, delivery, fish_audio, quality
+from . import audio, delivery, fish_audio, quality, public_usage
 from .sessions import Preview, Session, previews, sessions
 
 app = FastAPI(title='Tweeq', version='0.1.0')
 app.add_middleware(CORSMiddleware,
                    allow_origins=['http://localhost:5173', 'http://127.0.0.1:5173',
                                   'https://tweeq-ruby.vercel.app'],
-                   allow_methods=['GET', 'POST', 'DELETE'], allow_headers=['Content-Type', 'Authorization'])
+                   allow_methods=['GET', 'POST', 'DELETE'], allow_headers=['Content-Type', 'Authorization', 'X-Visitor-Session'])
 DATA = ROOT / 'audio'
 MAX_UPLOAD = 25 * 1024 * 1024
 
@@ -42,6 +42,38 @@ def require_demo_access(authorization: str | None = Header(default=None)):
     if scheme.lower() != 'bearer' or not secrets.compare_digest(supplied.encode(), expected.encode()):
         raise HTTPException(401, 'Enter a valid demo access code to use AI editing.',
                             headers={'WWW-Authenticate': 'Bearer'})
+
+
+async def require_ai_access(request: Request):
+    if public_usage.mode() == 'demo':
+        require_demo_access(request.headers.get('authorization'))
+        access = 'demo'
+    else:
+        access = (request.headers.get('x-visitor-session', ''), public_usage.ip_key(request))
+        await public_usage.evaluate('status', *access)
+    marker = public_usage.context.set(access)
+    try:
+        yield
+    finally:
+        public_usage.context.reset(marker)
+
+
+@app.post('/api/public/session')
+async def public_session(request: Request, response: Response):
+    response.headers['Cache-Control'] = 'no-store'
+    if public_usage.mode() != 'public':
+        return {'mode': 'demo'}
+    token = secrets.token_urlsafe(32)
+    usage = await public_usage.evaluate('create', token, public_usage.ip_key(request))
+    return {**usage, 'session_token': token}
+
+
+@app.get('/api/public/usage')
+async def public_usage_status(request: Request, response: Response):
+    response.headers['Cache-Control'] = 'no-store'
+    if public_usage.mode() != 'public':
+        return {'mode': 'demo'}
+    return await public_usage.evaluate('status', request.headers.get('x-visitor-session', ''), public_usage.ip_key(request))
 
 
 @app.exception_handler(RequestValidationError)
@@ -169,7 +201,7 @@ class TranscribeRequest(RegionRequest):
     revision: int = Field(ge=0)
 
 
-@app.post('/api/transcribe', dependencies=[Depends(require_demo_access)])
+@app.post('/api/transcribe', dependencies=[Depends(require_ai_access)])
 async def transcribe(body: TranscribeRequest):
     import io
     session = get_session(body.session_id)
@@ -234,7 +266,7 @@ async def ensure_voice(session, sid):
     raise fish_audio.FishError('Your voice is still being prepared. Wait a moment, then preview again; the existing voice model will be reused.', 503, code='fish_voice_processing')
 
 
-@app.post('/api/preview', dependencies=[Depends(require_demo_access)])
+@app.post('/api/preview', dependencies=[Depends(require_ai_access)])
 async def preview(body: PreviewRequest):
     sid = str(body.session_id)
     session = get_session(sid)

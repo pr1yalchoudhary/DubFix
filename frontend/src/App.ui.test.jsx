@@ -2,7 +2,7 @@ import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
-import { request, uploadAudio, downloadAudio } from './api'
+import { request, uploadAudio, downloadAudio, subscribeUsage, initializeUsage } from './api'
 
 const { mock, emitter } = vi.hoisted(() => {
   function emitter() {
@@ -12,7 +12,7 @@ const { mock, emitter } = vi.hoisted(() => {
   }
   return { mock: { waves: [], plugins: [], timelines: [] }, emitter }
 })
-vi.mock('./api', () => ({ request: vi.fn(), uploadAudio: vi.fn(), downloadAudio: vi.fn(), apiUrl: path => path, setDemoAccessToken: vi.fn() }))
+vi.mock('./api', () => ({ request: vi.fn(), uploadAudio: vi.fn(), downloadAudio: vi.fn(), apiUrl: path => path, setDemoAccessToken: vi.fn(), initializeUsage: vi.fn().mockResolvedValue({ mode: 'demo' }), subscribeUsage: vi.fn(() => () => {}) }))
 vi.mock('wavesurfer.js', () => ({ default: { create(options) {
   const wave = Object.assign(emitter(), { options, getDuration: () => 90, getWidth: () => 800, zoom: vi.fn(), setScrollTime: vi.fn(), destroy: vi.fn() })
   wave.pause = vi.fn(() => wave.emit('pause'))
@@ -35,6 +35,21 @@ vi.mock('wavesurfer.js/dist/plugins/timeline.esm.js', () => ({ default: { create
 const uploaded = { session_id: 'local-fixture-session', name: 'demo.wav', duration: 90, original_duration: 90, revision: 0,
   voice_status: 'ready', voice_error: null, reference: { start: 5, end: 15 }, reference_url: '/api/reference/local-fixture-session' }
 const generated = { preview_id: 'fixture-preview', preview_url: '/api/preview/fixture-preview', duration: 2, mode: 'correct' }
+
+it('shows free usage and exhaustion without a password in public mode', async () => {
+  const listener = subscribeUsage.mock.calls.at(-1)[0]
+  await act(async () => listener({ mode: 'public', remaining: 2, global_remaining: 10, message: 'Each provider attempt counts.' }))
+  expect(document.body.textContent).toContain('2 free AI uses remaining')
+  expect(document.querySelector('input[type=password]')).toBeNull()
+  await act(async () => listener({ mode: 'public', remaining: 0, global_remaining: 8, message: 'Each provider attempt counts.' }))
+  expect(document.body.textContent).toContain('Your free allowance has been reached')
+  expect(document.body.textContent).toContain('export remain available')
+})
+
+it('keeps the demo protection UI in rollback mode', async () => {
+  await act(async () => subscribeUsage.mock.calls.at(-1)[0]({ mode: 'demo' }))
+  expect(document.querySelector('input[type=password]')).not.toBeNull()
+})
 let root
 const field = id => document.getElementById(id)
 const buttons = () => [...document.querySelectorAll('button')]
@@ -57,6 +72,8 @@ async function openEditor({ select = true } = {}) {
 async function readyToGenerate() { await openEditor(); await type('replacement', 'April fifth.') }
 
 beforeEach(async () => {
+  initializeUsage.mockResolvedValue({ mode: 'demo' })
+  subscribeUsage.mockImplementation(() => () => {})
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
   document.body.innerHTML = '<div id="test-root"></div>'
   mock.waves.length = 0; mock.plugins.length = 0; mock.timelines.length = 0

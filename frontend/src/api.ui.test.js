@@ -1,7 +1,39 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { request, downloadAudio } from './api'
 
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.resetModules() })
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.resetModules(); sessionStorage.clear() })
+
+it('uses an opaque server session and refreshes authoritative usage even after a failed AI call', async () => {
+  const api = await import('./api')
+  const listener = vi.fn()
+  const unsubscribe = api.subscribeUsage(listener)
+  const fetch = vi.fn(async (url, options) => {
+    if (url.endsWith('/public/session')) return { ok: true, json: async () => ({ mode: 'public', session_token: 'opaque-server-issued-token', remaining: 2 }) }
+    expect(options.headers['X-Visitor-Session']).toBe('opaque-server-issued-token')
+    if (url.endsWith('/preview')) return { ok: false, status: 429, json: async () => ({ detail: 'Free allowance reached.' }) }
+    return { ok: true, json: async () => ({ mode: 'public', remaining: 0, global_remaining: 8 }) }
+  })
+  vi.stubGlobal('fetch', fetch)
+  await Promise.all([api.initializeUsage(), api.initializeUsage()])
+  expect(fetch).toHaveBeenCalledTimes(1)
+  await expect(api.request('/api/preview', {})).rejects.toThrow('Free allowance reached.')
+  await vi.waitFor(() => expect(listener).toHaveBeenLastCalledWith({ mode: 'public', remaining: 0, global_remaining: 8 }))
+  expect(fetch.mock.calls.filter(([url]) => url.endsWith('/preview'))).toHaveLength(1)
+  expect(fetch.mock.calls.every(([url]) => !url.includes('opaque-server-issued-token'))).toBe(true)
+  unsubscribe()
+})
+
+it('shows a storage failure without automatically retrying or issuing a generation', async () => {
+  const api = await import('./api')
+  const listener = vi.fn()
+  const unsubscribe = api.subscribeUsage(listener)
+  const fetch = vi.fn().mockResolvedValue({ ok: false, status: 503, json: async () => ({ detail: 'Public usage storage is unavailable.' }) })
+  vi.stubGlobal('fetch', fetch)
+  await expect(api.initializeUsage()).rejects.toThrow('storage is unavailable')
+  expect(listener).toHaveBeenCalledWith(expect.objectContaining({ unavailable: true }))
+  expect(fetch).toHaveBeenCalledTimes(1)
+  unsubscribe()
+})
 
 it('routes deployed requests and media URLs without leaking demo codes into URLs or downloads', async () => {
   vi.stubEnv('VITE_API_BASE_URL', 'https://tweeq-backend.onrender.com///')

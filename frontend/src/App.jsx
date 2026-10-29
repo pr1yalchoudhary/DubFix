@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Icon from './Icon'
 import AppHeader from './AppHeader'
-import { request, uploadAudio, downloadAudio, setDemoAccessToken } from './api'
+import { request, uploadAudio, downloadAudio, setDemoAccessToken, initializeUsage, subscribeUsage } from './api'
 import { stamp } from './WaveformEditor'
 import { EMPTY_DELIVERY } from './DeliveryControls'
 import EditorWorkspace from './EditorWorkspace'
@@ -10,6 +10,12 @@ import { sameSelection, validSelection, previewBlocker, previewKey } from './edi
 const CONSENT = "I confirm that this is my voice or that I have the speaker's permission to use it for AI-generated speech."
 
 export default function App() {
+  const [usage, setUsage] = useState(null)
+  useEffect(() => {
+    const unsubscribe = subscribeUsage(setUsage)
+    initializeUsage().catch(() => {})
+    return unsubscribe
+  }, [])
   const [session, setSession] = useState(null), [file, setFile] = useState(null), [consent, setConsent] = useState(false)
   const [busy, setBusy] = useState(''), [progress, setProgress] = useState(0), [error, setError] = useState('')
   const [region, setRegion] = useState({ start: 0, end: 3 }), [text, setText] = useState('')
@@ -148,10 +154,17 @@ export default function App() {
   return <div className="app-shell">
     <AppHeader recordingName={session?.name} busy={locked} canExport={!!(session?.edit_count ?? session?.revision)} onNew={reset} onExport={download}/>
     <main>
-      <details className="panel"><summary>Demo access</summary>
+      {usage?.mode === 'public' && <section className="panel" aria-label="Free AI usage" role="status">
+        <strong>{usage.unavailable ? 'Public AI temporarily unavailable' : `${usage.remaining} free AI uses remaining`}</strong>
+        {!usage.unavailable && <p>{usage.global_remaining} public AI uses left in total. {usage.remaining === 0 && 'Your free allowance has been reached. Playback, Undo/Redo and export remain available.'}</p>}
+        <p>{usage.message}</p>
+        <small>Anonymous sessions and network limits reduce abuse; they do not identify individual people.</small>
+        {usage.unavailable && <button className="secondary" onClick={() => initializeUsage().catch(() => {})}>Check availability</button>}
+      </section>}
+      {usage?.mode === 'demo' && <details className="panel"><summary>Demo access</summary>
         <label>Demo access code <input type="password" autoComplete="off" spellCheck={false} aria-label="Demo access code" onChange={e => setDemoAccessToken(e.target.value)}/></label>
         <p>Required for AI previews and speech detection. Kept only until this page is reloaded. After entering your code, retry speech detection or generate a preview.</p>
-      </details>
+      </details>}
       {error && <div role="alert" className="alert"><span>{error}</span><button className="quiet" onClick={() => setError('')} aria-label="Dismiss error">×</button></div>}
       {notice && !exported && <div role="status" className="success">{notice}</div>}
       {!session ? <section className="upload-screen">
