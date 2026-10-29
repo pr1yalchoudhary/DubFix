@@ -1,3 +1,4 @@
+import { apiUrl } from './api'
 import { useEffect, useRef, useState } from 'react'
 import DeliveryControls from './DeliveryControls'
 import Icon from './Icon'
@@ -48,12 +49,12 @@ export default function EditorWorkspace({ cleanup, previewCleanup, chooseCleanup
       {session.cleanup_available && !cleanup && <button className="secondary" disabled={locked} onClick={previewCleanup}>Compare gentle cleanup</button>}
       {session.cleanup_accepted && <p className="field-help">Cleanup accepted for voice setup. Original and Current remain unchanged.</p>}
       {cleanup && <div className="field-help" aria-label="Optional cleanup comparison"><p>Listen to both versions. Gentle cleanup may reduce steady noise, but can also affect speech. Nothing changes until you choose; this affects voice setup only.</p>
-        <label>Original recording<audio ref={cleanupOriginal} onPlay={() => stopOtherAudio(cleanupOriginal.current)} controls src={`/api/audio/${session.session_id}?version=original`} aria-label="Original for cleanup comparison"/></label>
-        <label>Gentle cleanup<audio ref={cleanupPreview} onPlay={() => stopOtherAudio(cleanupPreview.current)} controls src={cleanup.cleaned_url} aria-label="Gentle cleanup preview"/></label>
+        <label>Original recording<audio ref={cleanupOriginal} onPlay={() => stopOtherAudio(cleanupOriginal.current)} controls src={apiUrl(`/api/audio/${session.session_id}?version=original`)} aria-label="Original for cleanup comparison"/></label>
+        <label>Gentle cleanup<audio ref={cleanupPreview} onPlay={() => stopOtherAudio(cleanupPreview.current)} controls src={apiUrl(cleanup.cleaned_url)} aria-label="Gentle cleanup preview"/></label>
         {cleanup.error && <p role="alert">{cleanup.error}</p>}
         <button className="secondary" disabled={locked || !cleanup.can_accept || session.voice_prepared} onClick={() => chooseCleanup(true)}>Use cleanup for voice setup</button>
         <button className="quiet" disabled={locked} onClick={() => chooseCleanup(false)}>Keep original voice</button></div>}
-      <WaveformEditor url={`/api/audio/${session.session_id}?version=current&revision=${session.revision}`} duration={session.duration} region={region} onRegion={selectRegion} disabled={locked} onError={error} onPlay={() => stopOtherAudio()} pauseSignal={nativePlayback} undo={undo} redo={redo} canUndo={!!editCount} canRedo={!!session.can_redo}/>
+      <WaveformEditor url={apiUrl(`/api/audio/${session.session_id}?version=current&revision=${session.revision}`)} duration={session.duration} region={region} onRegion={selectRegion} disabled={locked} onError={error} onPlay={() => stopOtherAudio()} pauseSignal={nativePlayback} undo={undo} redo={redo} canUndo={!!editCount} canRedo={!!session.can_redo}/>
     </RecordingSurface>
     {!showEditing && <div className="selection-prompt"><div><h2>Select a phrase to start editing</h2><p>Drag across the waveform, or adjust Start and End.</p></div>
       {validSelection(region, session.duration) && <button className="secondary" disabled={locked} onClick={() => selectRegion(region, true)}>Edit selection</button>}</div>}
@@ -79,7 +80,7 @@ export default function EditorWorkspace({ cleanup, previewCleanup, chooseCleanup
       <StepHeading number="3" title="Preview and compare">Listen before you apply. Your original stays untouched.</StepHeading>
       <ReplacementPreview hidden={!reviewVisible}>
       <div className={`preview-box ${validPreview ? 'has-preview' : ''}`}><div className="preview-heading"><h3>Replacement preview</h3><button className="quiet" disabled={!!reason} onClick={generate}>Regenerate</button>{validPreview && <span className="pill">{Number.isFinite(preview.duration) ? `${preview.duration.toFixed(2)}s` : 'Ready'}{preview.mode === 'delivery' ? ' · Drama 3' : ''}</span>}</div>
-        {validPreview ? <audio ref={previewPlayer} key={preview.preview_id} controls src={preview.preview_url} aria-label="Generated replacement speech" onError={previewPlaybackFailed} onPlay={() => stopOtherAudio(previewPlayer.current)}/>
+        {validPreview ? <audio ref={previewPlayer} key={preview.preview_id} controls src={apiUrl(preview.preview_url)} aria-label="Generated replacement speech" onError={previewPlaybackFailed} onPlay={() => stopOtherAudio(previewPlayer.current)}/>
           : previewError ? <div className="warning" role="alert"><strong>{previewError}</strong><p>No playable replacement is available. Current is unchanged and Apply Edit is unavailable. Resolve the error, then try Generate Preview again.</p></div>
           : busy === 'generate' ? <p className="field-help" role="status">Generating the replacement clip. The player and Apply Edit will become available when generation succeeds.</p>
           : <p className="field-help">Generate a preview above to listen here. Changing the selection, text or mode clears an outdated preview.</p>}
@@ -94,7 +95,7 @@ export default function EditorWorkspace({ cleanup, previewCleanup, chooseCleanup
         <button disabled={locked} aria-pressed={version === 'original'} className={version === 'original' ? 'selected' : ''} onClick={() => selectVersion('original')}>Original</button>
         <button disabled={locked} aria-pressed={version === 'current'} className={version === 'current' ? 'selected' : ''} onClick={() => selectVersion('current')}>Edited</button>
       </div><div className="comparison-label" aria-live="polite"><span className={comparisonPlaying ? 'playing-dot playing' : 'playing-dot'}/>{comparisonPlaying ? 'Playing' : 'Ready to play'}: <strong>{version === 'original' ? 'Original recording' : 'Current recording'}</strong><span>{stamp(version === 'original' ? session.original_duration : session.duration)}</span></div>
-        <audio ref={comparison} key={`${version}-${session.revision}`} controls preload="metadata" aria-label={version === 'original' ? 'Original recording comparison' : 'Current recording comparison'} src={`/api/audio/${session.session_id}?version=${version}&revision=${session.revision}`}
+        <audio ref={comparison} key={`${version}-${session.revision}`} controls preload="metadata" aria-label={version === 'original' ? 'Original recording comparison' : 'Current recording comparison'} src={apiUrl(`/api/audio/${session.session_id}?version=${version}&revision=${session.revision}`)}
           onPlay={() => { setComparisonPlaying(true); stopOtherAudio(comparison.current) }} onPause={() => setComparisonPlaying(false)} onEnded={() => setComparisonPlaying(false)}/>
         <p className="field-help">Comparison changes only this player. Your waveform selection and draft text stay in place.</p></div>
         <div className="export-action"><span className="eyebrow">Export</span><h3>Save your recording</h3><p className="field-help">MP3 · 192 kbps · {stamp(session.duration)}</p>

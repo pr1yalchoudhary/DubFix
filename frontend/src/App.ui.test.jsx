@@ -12,7 +12,7 @@ const { mock, emitter } = vi.hoisted(() => {
   }
   return { mock: { waves: [], plugins: [], timelines: [] }, emitter }
 })
-vi.mock('./api', () => ({ request: vi.fn(), uploadAudio: vi.fn(), downloadAudio: vi.fn() }))
+vi.mock('./api', () => ({ request: vi.fn(), uploadAudio: vi.fn(), downloadAudio: vi.fn(), apiUrl: path => path, setDemoAccessToken: vi.fn() }))
 vi.mock('wavesurfer.js', () => ({ default: { create(options) {
   const wave = Object.assign(emitter(), { options, getDuration: () => 90, getWidth: () => 800, zoom: vi.fn(), setScrollTime: vi.fn(), destroy: vi.fn() })
   wave.pause = vi.fn(() => wave.emit('pause'))

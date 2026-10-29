@@ -22,9 +22,10 @@ def wav_bytes(seconds=16, frequency=220):
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
+    monkeypatch.setenv('DEMO_ACCESS_TOKEN', 'local-test-access-token-not-for-deployment')
     monkeypatch.setattr(main, 'DATA', tmp_path)
     sessions.clear(); previews.clear()
-    with TestClient(main.app) as client:
+    with TestClient(main.app, headers={'Authorization': 'Bearer local-test-access-token-not-for-deployment'}) as client:
         yield client
     sessions.clear(); previews.clear()
 

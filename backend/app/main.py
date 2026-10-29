@@ -1,6 +1,8 @@
 import math
 import asyncio
 import logging
+import os
+import secrets
 import shutil
 from pathlib import Path
 from datetime import datetime, timezone
@@ -12,7 +14,7 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / '.env')
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -23,10 +25,23 @@ from . import audio, delivery, fish_audio, quality
 from .sessions import Preview, Session, previews, sessions
 
 app = FastAPI(title='Tweeq', version='0.1.0')
-app.add_middleware(CORSMiddleware, allow_origins=['http://localhost:5173', 'http://127.0.0.1:5173'],
-                   allow_methods=['GET', 'POST', 'DELETE'], allow_headers=['Content-Type'])
+app.add_middleware(CORSMiddleware,
+                   allow_origins=['http://localhost:5173', 'http://127.0.0.1:5173',
+                                  'https://tweeq-ruby.vercel.app'],
+                   allow_methods=['GET', 'POST', 'DELETE'], allow_headers=['Content-Type', 'Authorization'])
 DATA = ROOT / 'audio'
 MAX_UPLOAD = 25 * 1024 * 1024
+
+
+def require_demo_access(authorization: str | None = Header(default=None)):
+    # Fail closed in every environment. CORS alone does not protect paid endpoints.
+    expected = os.getenv('DEMO_ACCESS_TOKEN', '').strip()
+    if len(expected) < 32:
+        raise HTTPException(503, 'AI demo access is not configured. Ask the demo owner to enable it.')
+    scheme, _, supplied = (authorization or '').partition(' ')
+    if scheme.lower() != 'bearer' or not secrets.compare_digest(supplied.encode(), expected.encode()):
+        raise HTTPException(401, 'Enter a valid demo access code to use AI editing.',
+                            headers={'WWW-Authenticate': 'Bearer'})
 
 
 @app.exception_handler(RequestValidationError)
@@ -154,7 +169,7 @@ class TranscribeRequest(RegionRequest):
     revision: int = Field(ge=0)
 
 
-@app.post('/api/transcribe')
+@app.post('/api/transcribe', dependencies=[Depends(require_demo_access)])
 async def transcribe(body: TranscribeRequest):
     import io
     session = get_session(body.session_id)
@@ -219,7 +234,7 @@ async def ensure_voice(session, sid):
     raise fish_audio.FishError('Your voice is still being prepared. Wait a moment, then preview again; the existing voice model will be reused.', 503, code='fish_voice_processing')
 
 
-@app.post('/api/preview')
+@app.post('/api/preview', dependencies=[Depends(require_demo_access)])
 async def preview(body: PreviewRequest):
     sid = str(body.session_id)
     session = get_session(sid)

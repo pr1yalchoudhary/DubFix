@@ -1,5 +1,8 @@
 .venv/
 backend/.env
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
 backend/audio/
 __pycache__/
 .pytest_cache/

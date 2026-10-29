@@ -1,7 +1,37 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { request, downloadAudio } from './api'
 
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.resetModules() })
+
+it('routes deployed requests and media URLs without leaking demo codes into URLs or downloads', async () => {
+  vi.stubEnv('VITE_API_BASE_URL', 'https://tweeq-backend.onrender.com///')
+  vi.resetModules()
+  const api = await import('./api')
+  api.setDemoAccessToken('private-demo-code')
+  const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}), blob: async () => new Blob() })
+  vi.stubGlobal('fetch', fetch)
+  await api.request('/api/preview', {})
+  expect(fetch.mock.calls[0][0]).toBe('https://tweeq-backend.onrender.com/api/preview')
+  expect(fetch.mock.calls[0][1].headers.Authorization).toBe('Bearer private-demo-code')
+  await api.request('/api/transcribe', {})
+  expect(fetch.mock.calls[1][1].headers.Authorization).toBe('Bearer private-demo-code')
+  await api.downloadAudio('/api/export/example')
+  expect(fetch.mock.calls[2][0]).toBe('https://tweeq-backend.onrender.com/api/export/example')
+  expect(fetch.mock.calls[2][1].headers.Authorization).toBeUndefined()
+  for (const path of ['/api/audio/example?revision=2', '/api/reference/example', '/api/preview/example', '/api/cleanup/example']) {
+    expect(api.apiUrl(path)).toBe('https://tweeq-backend.onrender.com' + path)
+  }
+  expect(api.apiUrl('blob:local')).toBe('blob:local')
+  expect(api.apiUrl('https://example.com/audio.wav')).toBe('https://example.com/audio.wav')
+  const open = vi.fn()
+  vi.stubGlobal('XMLHttpRequest', class {
+    constructor() { this.upload = {} }
+    open = open
+    send() { this.status = 200; this.responseText = '{}'; this.onload() }
+  })
+  await api.uploadAudio(new Blob(['audio']), true, vi.fn())
+  expect(open).toHaveBeenCalledWith('POST', 'https://tweeq-backend.onrender.com/api/upload')
+})
 
 it('times out a stalled generation without retrying or leaving its promise pending', async () => {
   vi.useFakeTimers()

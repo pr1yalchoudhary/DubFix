@@ -35,6 +35,58 @@ Set `FISH_AUDIO_API_KEY` in `backend/.env`. Keep the existing `FISH_AUDIO_MODEL`
 
 ## Run
 
+### Deployed frontend/backend and demo access
+
+The frontend supports a separate backend origin for both API calls and media playback.
+In Vercel, set `VITE_API_BASE_URL=https://tweeq-backend.onrender.com` for the production
+environment, then rebuild/redeploy the frontend. This is a public URL, not a secret.
+For localhost, leave it unset or empty: `/api` continues to use the existing Vite proxy.
+For local development against Render, use `frontend/.env.local` with the same URL.
+Vite reads this variable at build/start time; restart after changing it.
+
+Before exposing Fish Audio operations, deploy the backend changes to Render. Set
+`DEMO_ACCESS_TOKEN` in Render's server-side environment to a cryptographically random
+secret of at least 32 characters. Generate it locally with:
+
+```powershell
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+Set the same variable in ignored `backend/.env` for local AI editing. Keep
+`FISH_AUDIO_API_KEY` and `FISH_AUDIO_MODEL` on the backend as before. Never put either
+secret in Vercel, a `VITE_` variable, source code, or a URL. Share the demo access code
+privately with authorized testers. Enter it in the frontend's **Demo access** password
+field before generating a preview or selecting Change Delivery. The code is kept in
+page memory only and must be entered again after reload. If speech detection already
+failed before the code was entered, use its retry action. Invalid credentials do not
+cause automatic retries or provider requests.
+
+The backend protects `POST /api/preview` (including private voice creation) and
+`POST /api/transcribe` with constant-time bearer-token verification. Missing or short
+server configuration disables these routes with 503; missing/invalid credentials
+return 401. This applies on localhost too. CORS allows exactly the production Vercel
+origin and the two existing localhost origins, including the Authorization header.
+No cross-site cookies are required. CORS is not the access-control mechanism.
+
+Uploads, local audio processing, audio playback and downloads remain available without
+the demo code. Audio URLs contain no credentials. This is a shared demo gate, not
+per-user authentication, recording ownership enforcement, rate limiting or a spending
+cap: anyone holding the code can use AI operations. Rotate it in Render to revoke
+shared access. In-memory sessions still expire on backend restart; existing recording
+storage/retention behavior is unchanged. This change prepares the repository; it does
+not modify the live Render or Vercel environment or deploy either service.
+
+Local verification (no paid provider calls):
+
+```powershell
+$env:PYTHONPATH = 'backend'
+.\.venv\Scripts\python.exe -m pytest backend/tests -q
+cd frontend
+node --test src/deliveryText.test.js
+node node_modules/vitest/vitest.mjs run
+node node_modules/vite/bin/vite.js build
+```
+
 Terminal 1, from the project root:
 
 ```powershell
